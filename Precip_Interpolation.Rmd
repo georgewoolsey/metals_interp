@@ -14,6 +14,9 @@ library(lubridate)
 library(osmdata)
 library(gstat)
 library(elevatr)
+library(USAboundaries)
+library(leafpop) #map html popup
+library(stars)
 
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -22,10 +25,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Load in Precip data
 
-```{r}
+```{r, warning=F, message=F, results='hide'}
 load('data/DailyP.RData')
 
-head(daily_p)
+daily_p %>% glimpse()
 ```
 
 
@@ -43,12 +46,12 @@ st_write(unique_asos, 'data/unique_asso_elev.gpkg')
 ## Get Monthly P Averages
 
 
-```{r}
+```{r, warning=F, message=F, results='hide'}
 monthly_p <- daily_p %>%
   mutate(month = month(date)) %>%
   group_by(month, station) %>%
   summarize(monthly_p = sum(daily_p)) %>%
-  left_join(unique_asos) #grab elevation data
+  left_join(unique_asos, .) #grab elevation data
   
 
 ```
@@ -56,7 +59,7 @@ monthly_p <- daily_p %>%
 
 ## Look at monthly P
 
-```{r}
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 ggplot(monthly_p, aes(x = elevation, y = monthly_p, color = month)) + 
   scale_color_viridis_c() + 
   geom_point()
@@ -65,22 +68,20 @@ ggplot(monthly_p, aes(x = elevation, y = monthly_p, color = month)) +
 
 ## Getting Monthly Means of means, mins, maxes. 
 
-```{r}
+```{r, warning=F, message=F, results='hide'}
 monthly_t <- daily_p %>%
   mutate(month = month(date)) %>%
   group_by(month, station) %>%
   select(-lon,-lat) %>%
   summarize(across(where(is.numeric), mean)) %>%
-  left_join(unique_asos)
-
-
+  left_join(unique_asos, .)
 ```
 
 
 ## Temp vs Elevation
 
 
-```{r}
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 ggplot(monthly_t, aes(y = mean_temp, x = elevation, color = month)) + 
   geom_point() + 
   scale_color_viridis_c()
@@ -90,34 +91,46 @@ ggplot(monthly_t, aes(y = mean_temp, x = elevation, color = month)) +
 
 ## Pick a month (summer months are safer)
 
-
-```{r}
-
+```{r, warning=F, message=F, results='hide'}
+pushin_p <- monthly_t %>% 
+  filter(month == 7) %>% 
+  st_transform(2163)
 ```
 
 ### Build IDW precip or elevation for state for that month
 
-```{r}
+```{r, warning=F, message=F, results='hide'}
+co_state <- us_states(states = c("Colorado")) %>% 
+  st_transform(2163)
 
+pushin_p_stars <- st_bbox(co_state) %>%
+  st_as_stars(dx = 1000) %>%
+  st_crop(co_state)
+  
+interp = idw(daily_p~1, pushin_p, pushin_p_stars)
 ```
 
 ### Plot this data
 
-```{r}
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+
+mapview(interp,na.col=NA,col.regions=mapviewGetOption('vector.palette')) + 
+  mapview(pushin_p, zcol = 'daily_p')
+
 
 ```
 
 ### Build IDW with elevation for state for that month including elevation as a predictor
 
-Hint! Use `get_elev_raster` 
+Hint! Use `get_elev_raster` use a z of 7 or 8
 
-```{r}
+```{r, warning=F, message=F, results='hide'}
 
 ```
 
 ### Make a Map of that
 
-```{r}
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 ## You will need to create a Stars raster that has elevation data. 
 
 
@@ -134,9 +147,7 @@ How close do our simple approaches come to reproducing prism maps?
 https://www.prism.oregonstate.edu/recent/monthly.php
 
 
-
-
-```{r}
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 
 ```
 
