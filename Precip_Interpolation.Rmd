@@ -17,6 +17,7 @@ library(elevatr)
 library(USAboundaries)
 library(leafpop) #map html popup
 library(stars)
+library(viridis)
 
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -34,17 +35,23 @@ daily_p %>% glimpse()
 
 ## Get Elevation Data
 
-```{r, eval = F}
-unique_asos <- daily_p %>%
-  distinct(lon, lat, station)  %>%
-  st_as_sf(., coords = c('lon','lat'), crs = 4326) %>%
-  get_elev_point(.)
+```{r, eval = T}
+if(file.exists("data/unique_asos_elev.gpkg") == FALSE){
+  unique_asos <- daily_p %>%
+    distinct(lon, lat, station)  %>%
+    st_as_sf(., coords = c('lon','lat'), crs = 4326) %>%
+    get_elev_point(.)
+  
+  st_write(unique_asos, "data/unique_asos_elev.gpkg")
+}
+```
 
-st_write(unique_asos, 'data/unique_asso_elev.gpkg')
+## Read elevation data
+```{r, eval = TRUE}
+unique_asos <- st_read("data/unique_asos_elev.gpkg")
 ```
 
 ## Get Monthly P Averages
-
 
 ```{r, warning=F, message=F, results='hide'}
 monthly_p <- daily_p %>%
@@ -52,8 +59,6 @@ monthly_p <- daily_p %>%
   group_by(month, station) %>%
   summarize(monthly_p = sum(daily_p)) %>%
   left_join(unique_asos, .) #grab elevation data
-  
-
 ```
 
 
@@ -73,13 +78,12 @@ monthly_t <- daily_p %>%
   mutate(month = month(date)) %>%
   group_by(month, station) %>%
   select(-lon,-lat) %>%
-  summarize(across(where(is.numeric), mean)) %>%
+  summarize(across(where(is.numeric), mean, na.rm = T)) %>%
   left_join(unique_asos, .)
 ```
 
 
 ## Temp vs Elevation
-
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 ggplot(monthly_t, aes(y = mean_temp, x = elevation, color = month)) + 
@@ -87,37 +91,60 @@ ggplot(monthly_t, aes(y = mean_temp, x = elevation, color = month)) +
   scale_color_viridis_c()
 ```
 
+### Set up CO state spatial
 
+```{r, warning=F, message=F, results='hide'}
+# get state polygon
+co_state <- us_states(states = c("Colorado")) %>% 
+  st_transform(2163)
+
+# make grid out of state bounding box and crop to state
+co_state_stars <- st_bbox(co_state) %>%
+  st_as_stars(dx = 1000) %>%
+  st_crop(co_state)
+
+# change mapview defaults
+mapviewOptions(homebutton = FALSE, basemaps = c("Esri"))
+```
 
 ## Pick a month (summer months are safer)
 
 ```{r, warning=F, message=F, results='hide'}
-pushin_p <- monthly_t %>% 
-  filter(month == 7) %>% 
-  st_transform(2163)
+my_idw_fn <- function(my_month = 7, response_v = "daily_p", predictor = 1, lab = "Mean Precipitation"){
+# filter for month
+  pushin_p <- monthly_t %>% 
+    filter(month == my_month) %>% 
+    mutate(across(where(is.numeric), ~ ifelse(is.infinite(.x), NA, .x)
+                  )) %>% 
+    filter(if_all(starts_with(response_v), ~ !is.na(.))) %>% # gets rid of Inf and NA so IDW works
+    st_transform(2163)
+# Build IDW
+  fmla <- as.formula(paste(response_v, "~", predictor))
+  idw_intrpltn <- idw(fmla, pushin_p, co_state_stars)
+# Make plot
+  idw_map <- mapview(idw_intrpltn
+        , layer.name = lab
+        , col.regions= mapviewGetOption('vector.palette')
+        , popup = FALSE
+  ) + mapview(pushin_p
+        , zcol = response_v
+        , legend = FALSE
+  )
+return(list(idw_map, idw_intrpltn))
+}
 ```
+
 
 ### Build IDW precip or elevation for state for that month
 
 ```{r, warning=F, message=F, results='hide'}
-co_state <- us_states(states = c("Colorado")) %>% 
-  st_transform(2163)
-
-pushin_p_stars <- st_bbox(co_state) %>%
-  st_as_stars(dx = 1000) %>%
-  st_crop(co_state)
-  
-interp = idw(daily_p~1, pushin_p, pushin_p_stars)
+rslts <- my_idw_fn(my_month = 8, response_v = "max_temp", predictor = 1, lab = "Aug Max Temp")
 ```
 
 ### Plot this data
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
-
-mapview(interp,na.col=NA,col.regions=mapviewGetOption('vector.palette')) + 
-  mapview(pushin_p, zcol = 'daily_p')
-
-
+rslts[[1]]
 ```
 
 ### Build IDW with elevation for state for that month including elevation as a predictor
@@ -125,6 +152,8 @@ mapview(interp,na.col=NA,col.regions=mapviewGetOption('vector.palette')) +
 Hint! Use `get_elev_raster` use a z of 7 or 8
 
 ```{r, warning=F, message=F, results='hide'}
+elev_stars <- get_elev_raster(co_state, z = 7) %>% 
+  st_transform(2163)
 
 ```
 
