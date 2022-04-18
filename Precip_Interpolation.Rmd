@@ -18,6 +18,7 @@ library(USAboundaries)
 library(leafpop) #map html popup
 library(stars)
 library(viridis)
+library(tmap) # make publication quality maps
 
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -100,7 +101,7 @@ co_state <- us_states(states = c("Colorado")) %>%
 
 # make grid out of state bounding box and crop to state
 co_state_stars <- st_bbox(co_state) %>%
-  st_as_stars(dx = 1000) %>%
+  st_as_stars(dx = 1000) %>% # 1km grid
   st_crop(co_state)
 
 # change mapview defaults
@@ -135,16 +136,59 @@ return(list(idw_map, idw_intrpltn))
 ```
 
 
+```{r}
+# unique_asos_t <- st_transform(unique_asos, crs = 2163)
+# co_box <- st_bbox(unique_asos_t) %>% 
+#   st_as_stars(dx=1000)
+# 
+# 
+# july_t <- monthly_t %>% 
+#   dplyr::filter(month == 7) %>% 
+#   st_transform(., st_crs(co_box))
+# 
+# interp <- idw(mean_temp~1, july_t, co_box)
+# 
+# plot(interp)
+# mapview(interp)
+# 
+# tm_shape(interp[1]) + tm_raster(palette = 'Reds', style = 'cont')
+# 
+# #elevation impacted model of temp
+# ras <- get_elev_raster(unique_asos, z=8) %>% 
+#   raster::crop(., unique_asos)
+# 
+# mapview(ras)
+# co_stars <- st_as_stars(ras)
+# 
+# names(co_stars) <- 'elevation'
+# 
+# june_t <- monthly_t %>% 
+#   filter(month == 6)
+# 
+# interp = gstat::idw(mean_temp~elevation, june_t, co_stars)
+# 
+# tm_shape(interp[1]) + tm_raster(palette = 'plasma', style='cont')
+# 
+
+```
+
 ### Build IDW precip or elevation for state for that month
 
 ```{r, warning=F, message=F, results='hide'}
-rslts <- my_idw_fn(my_month = 8, response_v = "max_temp", predictor = 1, lab = "Aug Max Temp")
+precip_rslts <- my_idw_fn(my_month = 7, response_v = "mean_temp", predictor = 1, lab = "Aug Avg Precip")
+maxt_rslts <- my_idw_fn(my_month = 8, response_v = "max_temp", predictor = 1, lab = "Aug Avg Max Temp (F)")
 ```
 
 ### Plot this data
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
-rslts[[1]]
+# average precipitation IDW
+# spatial interpolation only
+precip_rslts[[1]]
+
+# average max temp IDW
+# spatial interpolation only
+maxt_rslts[[1]]
 ```
 
 ### Build IDW with elevation for state for that month including elevation as a predictor
@@ -152,17 +196,20 @@ rslts[[1]]
 Hint! Use `get_elev_raster` use a z of 7 or 8
 
 ```{r, warning=F, message=F, results='hide'}
-elev_stars <- get_elev_raster(co_state, z = 7) %>% 
-  st_transform(2163)
+elev_raster <- get_elev_raster(co_state, z = 7)
+names(elev_raster)[1] <- c("elevation")
 
+co_state_stars <- elev_raster %>% 
+  st_as_stars(., dx=4000, crs = 2163) %>% 
+  st_crop(co_state)
 ```
 
 ### Make a Map of that
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 ## You will need to create a Stars raster that has elevation data. 
-
-
+precip_elev <- my_idw_fn(my_month = 8, response_v = "max_temp", predictor = "elevation", lab = "Aug. Max Temp")
+precip_elev[[1]]
 
 ```
 
