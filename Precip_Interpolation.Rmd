@@ -1,8 +1,17 @@
 ---
 title: "Precipitation Interpolation"
-author: "Matthew Ross"
-date: "4/13/2022"
-output: html_document
+author: "Matthew Ross | Assignment completed by: George Woolsey"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+editor_options: 
+  chunk_output_type: console
+knit: (function(inputFile, encoding){ 
+    out_dir <- '/';
+    rmarkdown::render(inputFile, encoding = encoding, output_file=file.path(dirname(inputFile), out_dir, 'index.html')) 
+  })
 ---
 
 ```{r setup, include=FALSE}
@@ -19,6 +28,7 @@ library(leafpop) #map html popup
 library(stars)
 library(viridis)
 library(tmap) # make publication quality maps
+library(starsExtra)
 
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -72,27 +82,32 @@ ggplot(monthly_p, aes(x = elevation, y = monthly_p, color = month)) +
 ```
 
 
-## Getting Monthly Means of means, mins, maxes. 
+## Getting Monthly means and sums of measures
 
 ```{r, warning=F, message=F, results='hide'}
 monthly_t <- daily_p %>%
   mutate(month = month(date)) %>%
   group_by(month, station) %>%
   select(-lon,-lat) %>%
-  summarize(across(where(is.numeric), mean, na.rm = T)) %>%
-  left_join(unique_asos, .)
+  summarize(across(where(is.numeric), mean, na.rm = T, .names = "{.col}_mean")
+            , monthly_p_sum = sum(daily_p)
+      ) %>%
+  # summarize(across(where(is.numeric), list(mean = mean, sum = sum), na.rm = T)) %>%
+  left_join(unique_asos, ., by = c("station"="station"))
 ```
 
 
 ## Temp vs Elevation
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
-ggplot(monthly_t, aes(y = mean_temp, x = elevation, color = month)) + 
+ggplot(monthly_t, aes(y = mean_temp_mean, x = elevation, color = month)) + 
   geom_point() + 
   scale_color_viridis_c()
 ```
 
-### Set up CO state spatial
+#Assignment
+
+## Set up CO state spatial
 
 ```{r, warning=F, message=F, results='hide'}
 # get state polygon
@@ -108,10 +123,17 @@ co_state_stars <- st_bbox(co_state) %>%
 mapviewOptions(homebutton = FALSE, basemaps = c("Esri"))
 ```
 
-## Pick a month (summer months are safer)
+## Build a function for IDW model
 
 ```{r, warning=F, message=F, results='hide'}
-my_idw_fn <- function(my_month = 7, response_v = "daily_p", predictor = 1, lab = "Mean Precipitation"){
+my_idw_fn <- function(
+    my_month = 7
+    , response_v = "monthly_p_sum"
+    , predictor = c("1")
+    , lab = "July Total Precipitation"
+    , col_drctn = 1
+    , viridis_pal_opt = "G"
+  ){
 # filter for month
   pushin_p <- monthly_t %>% 
     filter(month == my_month) %>% 
@@ -120,15 +142,17 @@ my_idw_fn <- function(my_month = 7, response_v = "daily_p", predictor = 1, lab =
     filter(if_all(starts_with(response_v), ~ !is.na(.))) %>% # gets rid of Inf and NA so IDW works
     st_transform(2163)
 # Build IDW
-  fmla <- as.formula(paste(response_v, "~", predictor))
+  fmla <- as.formula(paste(response_v, paste(predictor, collapse=" + "), sep=" ~ "))
   idw_intrpltn <- idw(fmla, pushin_p, co_state_stars)
 # Make plot
   idw_map <- mapview(idw_intrpltn
         , layer.name = lab
-        , col.regions= mapviewGetOption('vector.palette')
+        , col.regions= viridis_pal(direction = col_drctn, option = viridis_pal_opt)
+        , na.color = NA
         , popup = FALSE
   ) + mapview(pushin_p
         , zcol = response_v
+        , col.regions= viridis_pal(direction = col_drctn, option = viridis_pal_opt)
         , legend = FALSE
   )
 return(list(idw_map, idw_intrpltn))
@@ -136,7 +160,7 @@ return(list(idw_map, idw_intrpltn))
 ```
 
 
-```{r}
+```{r, include=FALSE}
 # unique_asos_t <- st_transform(unique_asos, crs = 2163)
 # co_box <- st_bbox(unique_asos_t) %>% 
 #   st_as_stars(dx=1000)
@@ -172,17 +196,24 @@ return(list(idw_map, idw_intrpltn))
 
 ```
 
-### Build IDW precip or elevation for state for that month
+## IDW for Precip. and Max Temp.
 
 ```{r, warning=F, message=F, results='hide'}
-precip_rslts <- my_idw_fn(my_month = 7, response_v = "mean_temp", predictor = 1, lab = "Aug Avg Precip")
-maxt_rslts <- my_idw_fn(my_month = 8, response_v = "max_temp", predictor = 1, lab = "Aug Avg Max Temp (F)")
+# total precip
+precip_rslts <- my_idw_fn(my_month = 8, response_v = "monthly_p_sum"
+                          , predictor = 1, lab = "Aug Total Precip"
+                          , col_drctn = -1, viridis_pal_opt = "G")
+# avg max temp
+maxt_rslts <- my_idw_fn(my_month = 8, response_v = "max_temp_mean"
+                          , predictor = 1, lab = "Aug Avg Max Temp (F)"
+                          , col_drctn = 1, viridis_pal_opt = "E")
+
 ```
 
 ### Plot this data
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
-# average precipitation IDW
+# precipitation IDW
 # spatial interpolation only
 precip_rslts[[1]]
 
@@ -191,16 +222,20 @@ precip_rslts[[1]]
 maxt_rslts[[1]]
 ```
 
-### Build IDW with elevation for state for that month including elevation as a predictor
+<span style="color: blue;">The map above using `1` as a predictor of temperature/precipitation which means that the IDW model uses spatial interpolation only. Thus, there is a lack of predictive power in areas where there is no station data collected. </span>
 
-Hint! Use `get_elev_raster` use a z of 7 or 8
+## Beyond spatial only interpolation
+
+Build IDW with elevation for state for that month including elevation as a predictor
+
+Hint! Use `get_elev_raster` use a z of 6 or 7 or 8
 
 ```{r, warning=F, message=F, results='hide'}
-elev_raster <- get_elev_raster(co_state, z = 7)
+elev_raster <- get_elev_raster(co_state, z = 6)
 names(elev_raster)[1] <- c("elevation")
 
 co_state_stars <- elev_raster %>% 
-  st_as_stars(., dx=4000, crs = 2163) %>% 
+  st_as_stars(.) %>% 
   st_crop(co_state)
 ```
 
@@ -208,22 +243,68 @@ co_state_stars <- elev_raster %>%
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 ## You will need to create a Stars raster that has elevation data. 
-precip_elev <- my_idw_fn(my_month = 8, response_v = "max_temp", predictor = "elevation", lab = "Aug. Max Temp")
-precip_elev[[1]]
+maxt_elev <- my_idw_fn(my_month = 8, response_v = "max_temp_mean"
+                          , predictor = "elevation", lab = "Aug Avg Max Temp (F)"
+                          , col_drctn = 1, viridis_pal_opt = "E")
 
+maxt_elev[[1]]
 ```
 
+<span style="color: blue;">Note, the increased predictive resolution when including variation in both elevation and geographic space as predictors.</span>
 
 ### Compare both maps to PRISM approach for your month
 
-
 How close do our simple approaches come to reproducing prism maps? 
 
+[PRISM maps](https://www.prism.oregonstate.edu/recent/monthly.php)
 
-https://www.prism.oregonstate.edu/recent/monthly.php
+<span style="color: blue;">The map created above using elevation as a predictor of temperature aligns well with the PRISM map and improves upon the .</span>
 
+## Add aspect as predictor
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+# calculate aspect
+aspect <- starsExtra::aspect(co_state_stars[1])
+names(aspect)[1] <- c("aspect")
 
+# attach aspect to original stars data
+co_state_stars <- c(co_state_stars, aspect) %>% 
+  mutate(cos_aspect = cos(aspect))
+
+# quick plot
+ggplot() +
+  geom_stars(data = aspect %>% st_transform(., crs=st_crs(unique_asos))) +
+  # geom_stars(data = co_state_stars[3] %>% st_transform(., crs=st_crs(unique_asos))) +
+  geom_sf(data = unique_asos) +
+  theme_bw()
+
+# join aspect to station data
+asos_aspect <- st_extract(
+                    aspect %>% st_warp(., crs = st_crs(unique_asos))
+                    , unique_asos
+              ) %>% 
+  st_as_sf()
+
+# set up table to join to monthly data
+join_aspect <- unique_asos %>% 
+  st_join(., asos_aspect) %>% 
+  select(station, aspect) %>% 
+  st_set_geometry(., NULL) %>% 
+  as_tibble() 
+
+# join to monthly data used in IDW
+monthly_t <- monthly_t %>% 
+  left_join(., join_aspect, by = c("station"="station"))
 ```
 
+### Make a Map of that
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+maxt_elev_aspect <- my_idw_fn(my_month = 8, response_v = "max_temp_mean"
+                          , predictor = c("elevation", "aspect"), lab = "Aug Avg Max Temp (F)"
+                          , col_drctn = 1, viridis_pal_opt = "E")
+
+maxt_elev_aspect[[1]]
+```
+
+<span style="color: blue;">The map created above uses both elevation and aspect (in addition to spatial interpolation) as a predictor of temperature.</span>

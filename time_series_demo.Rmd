@@ -1,0 +1,197 @@
+---
+title: "Precipitation Interpolation"
+author: "Matthew Ross"
+date: "4/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(sf) # new goodness
+library(mapview)
+library(lubridate)
+library(viridis)
+library(dataRetrieval) #download usgs data
+library(tsibble) # time series tables
+library(imputeTS) # imputing over missing data gaps
+library(xts)
+library(dygraphs)
+library(plotly)
+
+library(leafpop) #map html popup
+library(stars)
+library(tmap) # make publication quality maps
+library(starsExtra)
+
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Load in chl-a data
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+chl_a <- readNWISuv("06888990"
+                    , parameterCd = "32318"
+                    , startDate = "2022-01-01"
+                    , endDate = "2022-03-01"
+              ) %>% 
+    renameNWISColumns(p32318 = "chl_a") %>% 
+    select(-ends_with("_cd"))
+
+
+
+
+ggplot(chl_a, aes(x = dateTime, y = chl_a_Inst)) +
+  geom_line() +
+  geom_point() +
+  theme_bw()
+
+# full_dates <- seq(min(chl_a$dateTime), max(chl_a$dateTime), by = "15 min")
+  
+# find and fill gaps with tsibble
+# https://cran.r-project.org/web/packages/tsibble/vignettes/implicit-na.html
+chl_ts <- as_tsibble(chl_a, index = dateTime)
+
+has_gaps(chl_ts)
+count_gaps(chl_ts)
+
+chl_full <- fill_gaps(chl_ts)
+
+ggplot(chl_full, aes(x = dateTime, y = chl_a_Inst)) +
+  geom_line() +
+  geom_point() +
+  theme_bw()
+
+chl_gap_filled <- chl_full %>% 
+  mutate(chl_linear = na_interpolation(chl_a_Inst, maxgap = Inf)) %>% 
+  pivot_longer(chl_a_Inst:chl_linear)
+
+ggplot(chl_gap_filled, aes(x = dateTime, y = value, color = name, size = name)) +
+  scale_size_manual(values = c(2,1)) +
+  geom_line() +
+  theme_bw()
+
+
+#smoothing
+chl_xts <- chl_gap_filled %>% 
+  dplyr::filter(name == "chl_linear") %>% 
+  dplyr::select(dateTime, value) %>% 
+  as.tibble() %>% 
+  mutate(type = "as.is")
+
+chl_hour <- chl_xts %>% 
+  mutate(dateTime = round_date(dateTime, "hour")) %>% 
+  group_by(dateTime) %>% 
+  summarize(value = median(value)) %>% 
+  mutate(type = "hourly median")
+
+chl_runmed <- chl_xts %>% 
+  mutate(value = runmed(value, 9)) %>% 
+  mutate(type = "run med")
+
+chl_both <- rbind(chl_runmed, chl_hour, chl_xts)
+  
+
+g1 <- ggplot(chl_both, aes(x = dateTime, y = value, color = type)) +
+  geom_line(alpha = 0.7) +
+  scale_colour_viridis_d(option = "A", direction = -1) +
+  theme_bw()
+
+ggplotly(g1, dynamicTicks = TRUE)
+
+
+```
+
+# Use other variable besides chl-a
+[USGS metadata](https://waterdata.usgs.gov/ks/nwis/uv?site_no=06888990)
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+# read discharge data 
+turbidity <- readNWISuv("06888990"
+                    , parameterCd = "63680"
+                    , startDate = "2022-01-01"
+                    , endDate = "2022-03-01"
+              ) %>% 
+    renameNWISColumns(p63680 = "turbidity") %>% 
+    select(-ends_with("_cd"))
+
+
+
+
+ggplot(turbidity, aes(x = dateTime, y = turbidity_Inst)) +
+  geom_line() +
+  geom_point() +
+  theme_bw()
+
+# full_dates <- seq(min(turbidity$dateTime), max(turbidity$dateTime), by = "15 min")
+  
+# find and fill gaps with tsibble
+# https://cran.r-project.org/web/packages/tsibble/vignettes/implicit-na.html
+turbidity_ts <- as_tsibble(turbidity, index = dateTime)
+
+has_gaps(turbidity_ts)
+count_gaps(turbidity_ts)
+
+turbidity_full <- fill_gaps(turbidity_ts)
+
+ggplot(turbidity_full, aes(x = dateTime, y = turbidity_Inst)) +
+  geom_line() +
+  geom_point() +
+  theme_bw()
+
+turbidity_gap_filled <- turbidity_full %>% 
+  mutate(turbidity_linear = na_interpolation(turbidity_Inst, maxgap = Inf, option = "linear")) %>% 
+  pivot_longer(turbidity_Inst:turbidity_linear)
+
+ggplot(turbidity_gap_filled, aes(x = dateTime, y = value, color = name, size = name)) +
+  scale_size_manual(values = c(2,1)) +
+  geom_line() +
+  theme_bw()
+
+
+#smoothing
+turbidity_xts <- turbidity_gap_filled %>% 
+  dplyr::filter(name == "turbidity_linear") %>% 
+  dplyr::select(dateTime, value) %>% 
+  as.tibble() %>% 
+  mutate(type = "as.is")
+
+turbidity_hour <- turbidity_xts %>% 
+  mutate(dateTime = round_date(dateTime, "hour")) %>% 
+  group_by(dateTime) %>% 
+  summarize(value = median(value)) %>% 
+  mutate(type = "hourly median")
+
+turbidity_day <- turbidity_xts %>% 
+  mutate(dateTime = round_date(dateTime, "day")) %>% 
+  group_by(dateTime) %>% 
+  summarize(value = median(value)) %>% 
+  mutate(type = "day median")
+
+turbidity_runmed <- turbidity_xts %>% 
+  mutate(value = runmed(value, 9)) %>% 
+  mutate(type = "run med")
+
+turbidity_both <- rbind(turbidity_runmed, turbidity_hour, turbidity_day, turbidity_xts)
+  
+
+g2 <- ggplot(turbidity_both, aes(x = dateTime, y = value, color = type)) +
+  geom_line(alpha = 0.7) +
+  scale_colour_viridis_d(option = "A", direction = -1) +
+  theme_bw()
+
+ggplotly(g2, dynamicTicks = TRUE)
+
+
+```
+
+# how to preserve the acutal peak or near it?
+# fourier transform
+[how to fourier transform](https://bookdown.org/rdpeng/timeseriesbook/the-fourier-transform.html)
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+# hey
+
+```
