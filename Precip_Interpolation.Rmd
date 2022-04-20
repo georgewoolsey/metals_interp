@@ -35,7 +35,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-# Load in Precip data
+# Classwork
+
+## Load Precip. data
 
 ```{r, warning=F, message=F, results='hide'}
 load('data/DailyP.RData')
@@ -105,7 +107,7 @@ ggplot(monthly_t, aes(y = mean_temp_mean, x = elevation, color = month)) +
   scale_color_viridis_c()
 ```
 
-#Assignment
+# Assignment
 
 ## Set up CO state spatial
 
