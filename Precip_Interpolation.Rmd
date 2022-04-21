@@ -145,7 +145,7 @@ my_idw_fn <- function(
     st_transform(2163)
 # Build IDW
   fmla <- as.formula(paste(response_v, paste(predictor, collapse=" + "), sep=" ~ "))
-  idw_intrpltn <- idw(fmla, pushin_p, co_state_stars)
+  idw_intrpltn <- gstat::idw(fmla, pushin_p, co_state_stars)
 # Make plot
   idw_map <- mapview(idw_intrpltn
         , layer.name = lab
@@ -198,7 +198,7 @@ return(list(idw_map, idw_intrpltn))
 
 ```
 
-## IDW for Precip. and Max Temp.
+## Ordinary and simple IDW
 
 ```{r, warning=F, message=F, results='hide'}
 # total precip
@@ -212,6 +212,8 @@ maxt_rslts <- my_idw_fn(my_month = 8, response_v = "max_temp_mean"
 
 ```
 
+<span style="color: blue;">Above, the ordinary and simple IDW model uses the formula `y~1`. Since no independent variables are defined the model only contains an intercept and beta should be the simple IDW mean. </span>
+
 ### Plot this data
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
@@ -224,13 +226,38 @@ precip_rslts[[1]]
 maxt_rslts[[1]]
 ```
 
-<span style="color: blue;">The map above using `1` as a predictor of temperature/precipitation which means that the IDW model uses spatial interpolation only. Thus, there is a lack of predictive power in areas where there is no station data collected. </span>
+<span style="color: blue;">The map above uses `1` as a predictor of temperature/precipitation which means that the IDW model uses spatial interpolation only. Thus, there is a lack of predictive power in areas where there is no station data collected. </span>
 
-## Beyond spatial only interpolation
+## Beyond ordinary and simple interpolation
 
-Build IDW with elevation for state for that month including elevation as a predictor
+Build IDW with elevation for the state to predict temperature for that month
 
 Hint! Use `get_elev_raster` use a z of 6 or 7 or 8
+
+### Linear trend elevation and temperature
+
+The universal IDW supposes that `y` is linearly dependent on `x1` and `x2` and thus uses the formula `y~x1+x2`.
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+
+ggplot(monthly_t %>% filter(month == 8), aes(x = elevation, y = max_temp_mean)) +
+  geom_point(alpha=0.8, color = "navy", size = 2) + 
+  geom_smooth(method = 'lm', color = "grey35", alpha = 0.8) +
+  labs(
+    title = "Relationship between elevation and Avg. Max Temperature (F)"
+    , subtitle = "August 2019"
+  ) +
+  xlab("Elevation (m)") +
+  ylab("Avg. Max Temp. (F)") +
+  theme_bw() +
+  theme(
+    legend.position="none"
+  )
+  
+
+```
+
+### Get elevation grid
 
 ```{r, warning=F, message=F, results='hide'}
 elev_raster <- get_elev_raster(co_state, z = 6)
@@ -241,18 +268,22 @@ co_state_stars <- elev_raster %>%
   st_crop(co_state)
 ```
 
-### Make a Map of that
+### Build Model
 
-```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
-## You will need to create a Stars raster that has elevation data. 
+```{r, warning=F, message=F, results='hide'}
 maxt_elev <- my_idw_fn(my_month = 8, response_v = "max_temp_mean"
                           , predictor = "elevation", lab = "Aug Avg Max Temp (F)"
                           , col_drctn = 1, viridis_pal_opt = "E")
 
+```
+
+### Make a Map of that
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 maxt_elev[[1]]
 ```
 
-<span style="color: blue;">Note, the increased predictive resolution when including variation in both elevation and geographic space as predictors.</span>
+<span style="color: blue;">Note, the increased predictive resolution when including variation in both elevation and geographic space as predictors. The universal IDW supposes that `y` is linearly dependent on `x1` and `x2` and thus uses the formula `y~x1+x2`.</span>
 
 ### Compare both maps to PRISM approach for your month
 
@@ -260,9 +291,13 @@ How close do our simple approaches come to reproducing prism maps?
 
 [PRISM maps](https://www.prism.oregonstate.edu/recent/monthly.php)
 
-<span style="color: blue;">The map created above using elevation as a predictor of temperature aligns well with the PRISM map and improves upon the .</span>
+<span style="color: blue;">The map created above using elevation as a predictor of temperature aligns well with the PRISM map and improves upon the spatial interpolation only mo.</span>
 
-## Add aspect as predictor
+## Elevation & aspect as predictors
+
+Build IDW with elevation and aspect for the state to predict temperature for that month
+
+### Calculate aspect
 
 ```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 # calculate aspect
@@ -299,13 +334,17 @@ monthly_t <- monthly_t %>%
   left_join(., join_aspect, by = c("station"="station"))
 ```
 
-### Make a Map of that
+### Build model
 
-```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
+```{r, warning=F, message=F, results='hide'}
 maxt_elev_aspect <- my_idw_fn(my_month = 8, response_v = "max_temp_mean"
                           , predictor = c("elevation", "aspect"), lab = "Aug Avg Max Temp (F)"
                           , col_drctn = 1, viridis_pal_opt = "E")
+```
 
+### Make a Map of that
+
+```{r, warning=F, message=F, fig.width = 8, fig.height = 5}
 maxt_elev_aspect[[1]]
 ```
 
